@@ -58,9 +58,7 @@ jobs:
         run: |
           echo '修改VersionName'
           if [ "${{ matrix.userName }}" == "takagen99" ]; then
-            # 进行 sed 修改
             sed -i 's/\.concat(buildTime())/ +\"${{ env.tag }}\"/g' app/build.gradle 
-            # 目前关于页面没有合并我的分支
             sed -i "/android:text=/s#=\"#=\"${{ env.tag }}\\\\n\\\\n#" app/src/main/res/layout/dialog_about.xml
           else
              sed -i "/versionName/s#[0-9a-zA-Z_\.\'\"-]\+\$#\'${{ env.tag }}\'#" app/build.gradle
@@ -77,7 +75,6 @@ jobs:
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
         run: |
-          #zip -q -x ".git/*" -x  ".github/*" -r sourceCode-${{ env.commitS }}.zip .
           tar -cJf sourceCode-${{ env.commitS }}.tar.xz --exclude=.git --exclude=.github *
           
       - name: Setup Python
@@ -92,23 +89,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install lxml ujson pyquery requests jsonpath cachetools pycryptodome beautifulsoup4
 
-      - name: Modify pyramid——build.gradle
+      - name: Modify pyramid build.gradle
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
         run: |
-          # 移除 Windows Python 路径配置
           sed -i '/buildPython.*python.exe/d' pyramid/build.gradle
 
-      # ============ 修复 local.properties 错误 ============
-      - name: Create local.properties for pyramid module
+      - name: Create local.properties
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
         run: |
-          echo "创建 local.properties 文件"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "local.properties 内容:"
+          echo "local.properties created:"
           cat local.properties
-      # ===================================================
 
       - name: Release Apk Sign
         if: ${{ env.commit }}
@@ -149,15 +142,12 @@ jobs:
           rm -rf apk/
           mkdir -p apk/
           for file in `find ~ -name "*release*.apk" -print`; do
-            # 获取文件的基本名称
             base=$(basename "$file")
-            # 如果文件是 TVBox_ 开头
             if [[ "$base" == TVBox_* ]]; then
               new_base=$(echo "$base" | sed "s/release/${{ matrix.userName }}_${{ env.tag }}/")
             else
               new_base="TVBox_${{ matrix.userName }}_${{ env.tag }}.apk"
             fi
-            # 移动并重命名文件
             mv "$file" "apk/$new_base"
           done
           mv sourceCode-${{ env.commitS }}.* apk/
@@ -166,13 +156,21 @@ jobs:
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
         run: |
-          lastCommit=$(grep "${{ matrix.userName }}\/${{ matrix.repoName }}" ${{ github.workspace }}/README.md |grep -o '[a-z0-9]\{40\}')
+          # 使用 || echo "" 防止 grep 找不到时退出
+          lastCommit=$(grep "${{ matrix.userName }}\/${{ matrix.repoName }}" ${{ github.workspace }}/README.md | grep -o '[a-z0-9]\{40\}' || echo "")
           export LESSCHARSET=utf-8
           echo -e "Credit: [${{ matrix.userName }}](${{ env.upStream }})\nCommit: ${{ env.commit }}\nChangelog:\n\`\`\`" > apk/${{ matrix.userName }}-Release.log
+          
           if [ "${{ env.commit }}" == "${lastCommit}" ]; then
-            git log --pretty=format:%B ${{ env.commitS }} -1 |sed -e "s# \{2,\}#\n#g" -e "/^Merge \(pull\|branch\|remote\)/d" -e '/^$/d' |cat -n |sort -k2,2 -k1,1n |uniq -f1 |sort -k1,1n |cut -f2- >> apk/${{ matrix.userName }}-Release.log
+            # 只有当前提交
+            git log --pretty=format:%B ${{ env.commitS }} -1 | sed -e "s# \{2,\}#\n#g" -e "/^Merge \(pull\|branch\|remote\)/d" -e '/^$/d' | cat -n | sort -k2,2 -k1,1n | uniq -f1 | sort -k1,1n | cut -f2- >> apk/${{ matrix.userName }}-Release.log
+          elif [ -n "${lastCommit}" ]; then
+            # 有上次提交记录
+            git log --pretty=format:%B ${{ env.commitS }}...${lastCommit:0:7} | sed -e "s# \{2,\}#\n#g" -e "/^Merge \(pull\|branch\|remote\)/d" -e '/^$/d' | cat -n | sort -k2,2 -k1,1n | uniq -f1 | sort -k1,1n | cut -f2- >> apk/${{ matrix.userName }}-Release.log
           else
-            git log --pretty=format:%B ${{ env.commitS }}...${lastCommit:0:7} |sed -e "s# \{2,\}#\n#g" -e "/^Merge \(pull\|branch\|remote\)/d" -e '/^$/d' |cat -n |sort -k2,2 -k1,1n |uniq -f1 |sort -k1,1n |cut -f2- >> apk/${{ matrix.userName }}-Release.log
+            # 没有上次提交记录，显示最近5条
+            echo "No previous commit found, showing last 5 commits:" >> apk/${{ matrix.userName }}-Release.log
+            git log --pretty=format:%B -5 | sed -e "s# \{2,\}#\n#g" -e "/^Merge \(pull\|branch\|remote\)/d" -e '/^$/d' | cat -n | sort -k2,2 -k1,1n | uniq -f1 | sort -k1,1n | cut -f2- >> apk/${{ matrix.userName }}-Release.log
           fi
           echo -e '\n```' >> apk/${{ matrix.userName }}-Release.log
           
